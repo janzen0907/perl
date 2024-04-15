@@ -33,6 +33,7 @@ for (1..3)
 print "PARENT: MY PID is $$. I'm obviously the parent, because otherwise how would i get to this code?\n";
 print "PARENT: I'll wait for my children to die.\n";
 
+# Loop on wait until it returns -1 to wait for the children to die. 
 while ( ($wait_pid = wait) != -1) # NOTE: If there are no children wait will return -1
 {
     $exit_status = $? >> 8;

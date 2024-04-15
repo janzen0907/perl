@@ -2,10 +2,12 @@
 #
 # Take two arguments both ints
 
+# This is not complete
+
 use strict;
 use warnings;
 
-print "Enter a Low and a high integer\n";
+print "Enter a Low and a high insteger\n";
 
 open(my $psswd, '<', '/etc/passwd') or die "Cannot open /etc/passwd\n"; 
 
