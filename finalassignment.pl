@@ -1,18 +1,19 @@
 #!/usr/bin/perl
 #
 # Purpose: Script for managaing LDAP users on a remote system. 
+# Issues: I'm not sure if my send and recv to the sockets are sending information,
+# Been stuck for a while on trying to get a response from the server. I'm fundamentally misunderstanding
+# sockets at this point it is has made this assignment very difficult for me.
 # Author: John Janzen (janzen0907)
 
 use strict;
 use warnings;
-use feature qw(switch);
 use IO::Socket;
 
 # Variables
 my $userlist;
 my $grouplist;
 my $next_uid = 5000;
-# my $client_socket;
 my $add_group;
 my $client_message;
 my $group_name;
@@ -20,80 +21,173 @@ my $new_uid;
 my $home_dir;
 my $PORT = 10912;
 
-# Check if any command-line arguments are provided
-if (@ARGV) {
-    # Client mode
-    my $server_address = shift(@ARGV);
+# Check if the server address was provided
+(@ARGV == 1) or die "Supply one arugment - the adderess of the server";
 
-    print "CLIENT: Attempting to connect to $server_address\n";
-
-    # Create a client socket
-    my $client_socket = new IO::Socket::INET(
-        PeerAddr => $server_address,
-        PeerPort => $PORT,
-        Proto    => 'tcp'
-    ) or die "Could not create socket to $server_address:$PORT: $!\n";
-
-    # Menu to provide the valid options to the user.
-    print "CLIENT: Successfully connected to $server_address. Please select an option\n";
-    print "1: List the LDAP Users\n";
-    print "2: List the LDAP Groups\n";
-    print "3: Set a group\n";
-    print "4: Create a user\n";
-    print "5: Exit\n";
-    print "Enter your choice please: ";
-
-    # Get the choice from the user
-    my $user_choice = <STDIN>;
-
-    # Send the choice to the server
-    $client_socket->send($user_choice);
-
-    # Receive response from the server
-    my $response;
-    $client_socket->recv($response, 1024);
-    print "CLIENT: Received from server: $response\n";
-
-    # Close client socket
-    close($client_socket) or die "Couldn't close socket: $!\n";
-} else {
-    # Server mode
-    # Start the server
-    my $server_socket = new IO::Socket::INET(
-        LocalPort => $PORT,
-        Proto     => 'tcp',
-        Listen    => 5,
-        Reuse     => 1
-    ) or die "Could not create server socket: $!\n";
-
-    print "Server is listening on port $PORT\n";
-
-    print "The socket is: $server_socket\n";
-
+# Assign the server address from the Args
+my $server_address = shift;
 # Start the server
-my $server_socket = new IO::Socket::INET(
-    LocalPort => $PORT,
-    Proto => 'tcp',
-    Listen => 5,
-    Reuse => 1
-) or die "Could not create server socket: $!\n";
+my $server_socket = start_server($server_address);
+print "SERVER: Is running at $server_address:$PORT";
 
-print "Server is listening on port $PORT\n";
+# Create the client connection
+my $client_socket = new IO::Socket::INET(
+    PeerAddr => $server_address,
+    PeerPort => $PORT,
+    Proto => 'tcp'
+);
+# Check if the conenction is successful
+die "Could not connect to server: $!\n" unless $client_socket;
 
-print "The socket is: $server_socket\n";
-
-# Client Code
-while (my $client_socket = $server_socket->accept())
+# Subroutine to start up the server
+sub start_server 
 {
-        # Get the client message
-    $client_socket->recv(my $client_message, 1024);
+    my ($server_address) = @_;
+    $server_socket = new IO::Socket::INET(
+        LocalAddr => $server_address,
+        LocalPort => $PORT,
+        Proto => 'tcp',
+        Listen => 5,
+        Reuse => 1
+    ) or die "Could not create server socket: $!\n";
+    print "SERVER: Socket created, bound, and now listening on port $PORT.\n";
+    return $server_socket;
+}
+
+
+# Menu to provide the valid options to the user. 
+print "CLIENT: Successfully connected to $server_address. Please select an option\n";
+print "1: List the LDAP Users\n";
+print "2: List the LDAP Groups\n";
+print "3: Set a group\n";
+print "4: Create a user\n";
+print "5: Exit\n";
+print "Enter your choice please\n";
+
+my $user_choice = <STDIN>;
+chomp($user_choice);
+
+
+# Process user choice
+if ($user_choice == 1) 
+{
+    $client_message = "userlist";
+} elsif ($user_choice == 2) 
+{
+    $client_message = "grouplist";
+} elsif ($user_choice == 3) 
+{
+    print "Enter the name of the group: \n";
+    my $group = <STDIN>;
+    chomp($group);
+    $client_message = "setgroup $group";
+} elsif ($user_choice == 4) 
+{
+    print "Enter the username: \n";
+    my $username = <STDIN>;
+    chomp($username);
+    print "Enter the password: \n";
+    my $password = <STDIN>;
+    chomp($password);
+    $client_message = "createuser $username $password";
+} elsif ($user_choice == 5) {
+    print "Closing the script\n";
+    # Close the socket and exit
+    close($client_socket);
+    exit 0;
+    last;
+} else 
+{
+    print "Invalid choice. Please choose a selection between 1-5\n";print "Invalid choice, Please choose a selection between 1-5\n";
+    print "Your choice was $user_choice\n";
+    next;
+}
+
+# Send the choice to the server
+$client_socket->send("$user_choice\n");
+
+my $response;
+# Send a message to the server
+$client_socket->recv($response, 1024);
+
+while (<$client_socket>)
+{
+    print "CLIENT: Recieved response from server: $_\n";
+}
+
+close($client_socket);
+
+# Accept Connections from client
+# I am so turned around with the connections. Really
+# Need to figure out what is resonsible for what
+while ($client_socket = $server_socket->accept())
+{
+    my $client_message;
+    print "SERVER: Connected to the server\n";
+    $client_socket->recv($client_message, 1024);
     chomp($client_message);
-    
-    # Check what the message coming from the client is
-    if ($client_message eq "userlist")        {
-        # Code here to get a comma seperated list of all the LDAP users on the server
-        # Osudo slapcat to get the LDAP Database
-        open(my $LDAPUSERS, "sudo slapcat |" ) or die "Couldn't Open the ldap database. $!\n";            # I can either put all the input into a file then parse it or just parse the stream
+    # $client_socket->recv($client_message, 1024);
+    print "SERVER: Received message from client: $client_message\n";
+    process_client_request($client_socket, $client_message);
+}
+
+# 
+# while ($client_socket = $server_socket->accept())
+# {
+#     print "SERVER: Connection received from client.\n";
+#     my $client_message = get_message_from_client($client_socket);
+#     $client_message = "Hello Server";
+#     print "SERVER: Received message from client: $client_message\n";
+#     process_client_request($client_socket, $client_message);
+# }
+
+
+
+
+# Sub to get the message that the client is sending to the server
+sub get_message_from_client {
+    my ($client_socket) = @_;
+    my $client_message;
+    $client_socket->recv($client_message, 1024);
+    chomp($client_message);
+    return $client_message;
+}
+
+# Sub to get the string from the client and then call required subroutines to complete the request
+sub process_client_request {
+    my ($client_socket, $client_message) = @_;
+
+    if ($client_message eq "userlist")
+    {
+        $userlist = get_userlist();
+        print $client_socket "$userlist\n";
+    }
+    elsif ($client_message eq "grouplist")
+    {
+        $grouplist = get_grouplist();
+        print $client_socket "$grouplist\n";
+    }
+    elsif ($client_message eq "setgroup")
+    {
+        my $group_name = $1;
+        set_group($client_socket, $group_name);
+    }
+    elsif ($client_message eq "createuser")
+    {
+        my $username = $1;
+        create_user($client_socket, $username);
+    }
+    else
+    {
+        print $client_socket "Invalid command\n";
+    }
+}
+
+# Subroutine to get a list of users from ldap
+sub get_userlist
+{
+    my $userlist;
+    open(my $LDAPUSERS, "sudo slapcat |" ) or die "Couldn't Open the ldap database. $!\n"; 
 
         while (my $line = <$LDAPUSERS>)
         {
@@ -104,19 +198,19 @@ while (my $client_socket = $server_socket->accept())
                 # Add the users to a cs list
                 $userlist .= "$1,";
             }
-
-            # Get rid of the trailing comma
-            $userlist =~ s/,$//; 
         }  
+        # Get rid of the trailing comma
+        $userlist =~ s/,$//; 
         # Close the file handle
         close($LDAPUSERS);
-    }
+        return $userlist;
+}
 
-    elsif ($client_message eq "grouplist")
-    {
-
-        # Code here to get a comma seperated list of all the LDAP groups on the server
-        open(my $LDAPGROUPS, "sudo slapcat |") or die "Couldn't Open the ldap database. $!\n";
+# Subroutine to query ldap and get the groups 
+sub get_grouplist
+{
+    my $grouplist;
+    open(my $LDAPGROUPS, "sudo slapcat |") or die "Couldn't Open the ldap database. $!\n";
 
         while(my $line = <$LDAPGROUPS>)
         {
@@ -128,74 +222,70 @@ while (my $client_socket = $server_socket->accept())
                 # Add the groups to a cs list
                 $grouplist .= "$1,";
             }
-
+        }
             # Get rid of the trailing comma
             $grouplist =~ s/,$//;
-
-        }
-            # Close the file handle
             close($LDAPGROUPS);
-    }
+            return $grouplist;
+}
 
-    elsif ($client_message eq "setgroup") 
-    {
-        # Code here to get two arguments - first is the command second is the name of the group to create new users in
-        (@ARGV == 2) or die "Please supply the name of the group to create\n";
-        my $newgroup = shift;
-        # Boolean to see if the group exists
-        my $group_exists = 0;
-        open(my $LDAPNEWGROUP, "sudo slapcat | ") or die "Couldn't Open the ldap database. $!\n";
+sub set_group
+{
+    my ($client_socket, $group_name) = @_;
+    (@ARGV == 2) or die "Please supply the name of the group to create\n";
+    my $newgroup = shift;
+    # Boolean to see if the group exists
+    my $group_exists = 0;
+    open(my $LDAPNEWGROUP, "sudo slapcat | ") or die "Couldn't Open the ldap database. $!\n";
             
-        while(my $line = <$LDAPNEWGROUP>)
+    while(my $line = <$LDAPNEWGROUP>)
+    {
+        chomp($line);
+
+        # Use a regex to get the group name (cn) from LDAP
+        if ($line =~ /cn: ([a-zA-Z0-9]+)/)
         {
-            chomp($line);
+            # Get the name of the group to compare
+            my $group_name = $1;
 
-            # Use a regex to get the group name (cn) from LDAP
-            if ($line =~ /cn: ([a-zA-Z0-9]+)/)
+            # Check if the passed in group matches any group names
+            if ($group_name eq $newgroup)
             {
-                # Get the name of the group to compare
-                my $group_name = $1;
-
-                # Check if the passed in group matches any group names
-                if ($group_name eq $newgroup)
-                {
-                    # Set our boolean to 1, indicating the group does exist
-                    $group_exists = 1;
-                    # Respond with “set” if the group existed
-                    print $client_socket "set\n";
-                    last; # Exit the loop we are done at this point
-                }
-                    
-                }
-            # If this group does not exist, the server should create it. The server should respond to the client 
-                
-            if (!$group_exists)
-            {
-                my $add_group = `sudo groupadd $newgroup 2>&1`;
+                # Set our boolean to 1, indicating the group does exist
+                $group_exists = 1;
+                # Respond with “set” if the group existed
                 print $client_socket "set\n";
-                if($? == 0)
-                {
-                    # The group was created successfully
-                    #“created” if the group had to be created,
-                    print $client_socket "created\n";
-                }
-                else
-                {
-                    # or “error” if the group did not exist and could not be created.
-                    print $client_socket "error\n";
-                } 
-                    
+                last; # Exit the loop we are done at this point
             }
-                
                     
         }
+        # If this group does not exist, the server should create it. The server should respond to the client 
+                
+        if (!$group_exists)
+        {
+            my $add_group = `sudo groupadd $newgroup 2>&1`;
+            print $client_socket "set\n";
+            if($? == 0)
+            {
+                # The group was created successfully
+                #“created” if the group had to be created,
+                print $client_socket "created\n";
+            }
+            else
+            {
+                # or “error” if the group did not exist and could not be created.
+                print $client_socket "error\n";
+            } 
+                    
+        }           
+    }
             # Close the file handle
             close($LDAPNEWGROUP);
-    }
-        
-    elsif ($client_message eq "createuser")
-    {
-        # Code here to get three arguments - first is the command second is the name of the user the client wants to 
+}
+
+sub create_user
+{
+    # Code here to get three arguments - first is the command second is the name of the user the client wants to 
         # make, third is the password for the user being created.
         (@ARGV == 3) or die "Please supply the name of the user and the password for this user\n";
         # Get the username and password from the arguments 
@@ -272,100 +362,5 @@ while (my $client_socket = $server_socket->accept())
         {
             print $client_socket "error-other\n";
         }
-        # Remove the temp file
-        # unlink $ldif_file;
-    }
+}
         
-}
-
-(@ARGV == 1) or die "Supply one argument, the IP address of the server\n";
-# Perhaps consider a variable here for the port number
-my $server_address = shift;
-
-print " CLIENT: Attempting to connect to $server_address";
-
-my $client_socket = new IO::Socket::INET(
-    PeerAddr => $server_address,
-    PeerPort => $PORT,
-    Proto => 'tcp'
-);
-die "Could not create socket to $server_address:$PORT :$!" unless $client_socket;
-
-# Menu to provide the valid options to the user. 
-print "CLIENT: Successfully connected to $server_address. Please select an option\n";
-print "1: List the LDAP Users\n";
-print "2: List the LDAP Groups\n";
-print "3: Set a group\n";
-print "4: Create a user\n";
-print "5: Exit\n";
-print "Enter your choice please\n";
-
-# Get the choice from the user
-my $user_choice = <STDIN>;
-
-# Get the message from the user and send it to the client
-# I didn't want to use if statements, learned switch (given, when) from
-# https://www.perltutorial.org/perl-given/
-given($user_choice)
-{
-    when (1) 
-    {
-        $client_message = "userlist";
-    }
-    when (2)
-    {
-        $client_message = "grouplist";
-    }
-    when (3)
-    {
-        print "Enter the name of the group: \n";
-        my $group = <STDIN>;
-        chomp($group);
-        $client_message = "setgroup $group";
-    }
-    when (4)
-    {
-        print "Enter the username: \n";
-        my $username = <STDIN>;
-        chomp($username);
-        print "Enter the password: \n";
-        my $password = <STDIN>;
-        chomp($password);
-        $client_message = "createuser $username $password";
-    }
-    when (5)
-    {
-        print "Closing the script\n";
-        last;
-    }
-    default
-    {
-        print "Invalid choice, Please choose a selection between 1-5\n";
-        next;
-    }
-}
-
-# Send a message to the server
-$client_socket->send($client_message);
-
-print "The server responded:\n";
-
-while (<$client_socket>)
-{
-    # Use the topic to get the message from the server
-    print "CLIENT: Recived from server: $_\n";
-}
-
-print "CLIENT: The server has closed the connection\n";
-close $client_socket or die "Couldn't close socket.\n";
-
-print "Client Socket is $client_socket\n";
-
-# Server Code
-# Loop while there is a connection
-
-
-# Code to send messages to the client, further refine this
-# print $client_socket = 
-
-
