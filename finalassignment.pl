@@ -1,10 +1,13 @@
 #!/usr/bin/perl
 #
 # Purpose: Script for managaing LDAP users on a remote system. 
-# Issues: I'm not sure if my send and recv to the sockets are sending information,
-# Been stuck for a while on trying to get a response from the server. I'm fundamentally misunderstanding
-# sockets at this point it is has made this assignment very difficult for me.
+# 
+# Issues: Currently the Prompts for the client are appearing on the server.. I sadly ran
+# out of time to try and fix this. I think its due to some of my send -> recv messages
+# being backwards.
+# 
 # Author: John Janzen (janzen0907)
+# Class: COOS 291 - Section B
 
 use strict;
 use warnings;
@@ -15,179 +18,195 @@ my $userlist;
 my $grouplist;
 my $next_uid = 5000;
 my $add_group;
+my $client_socket;
 my $client_message;
 my $group_name;
 my $new_uid;
 my $home_dir;
 my $PORT = 10912;
+my $localhost = '10.36.106.94';
+my $server_mode = 0;
 
-# Check if the server address was provided
-(@ARGV == 1) or die "Supply one arugment - the adderess of the server";
-
-# Assign the server address from the Args
-my $server_address = shift;
-# Start the server
-my $server_socket = start_server($server_address);
-print "SERVER: Is running at $server_address:$PORT";
-
-# Create the client connection
-my $client_socket = new IO::Socket::INET(
-    PeerAddr => $server_address,
-    PeerPort => $PORT,
-    Proto => 'tcp'
-);
-# Check if the conenction is successful
-die "Could not connect to server: $!\n" unless $client_socket;
-
-# Subroutine to start up the server
-sub start_server 
+# Check if an ip address is provided
+if (@ARGV == 0) 
+{ 
+    print "Attempting to start server mode";
+    $server_mode = 1; # Server mode
+    print "Server mode is set to : $server_mode";
+}
+elsif (@ARGV == 1)
 {
-    my ($server_address) = @_;
-    $server_socket = new IO::Socket::INET(
-        LocalAddr => $server_address,
+    print "In Client mode";
+    $server_mode = 0; # Client mode
+    print "Server mode is set to : $server_mode";
+}
+else
+{
+    die "Supply 0 args for server mode and 1 argument (ip address of server) for client mode";
+}
+
+if($server_mode)
+{
+    print "In server Mode";
+    start_server($localhost);
+    print "The server is running";
+}
+else 
+{
+    my $server_address = shift;
+    $client_socket = new IO::Socket::INET(
+        PeerAddr => $server_address,
+        PeerPort => $PORT,
+        Proto => 'tcp'
+    );
+    # Check if the conenction is successful
+    die "Could not connect to server: $!\n" unless $client_socket; 
+
+
+    print "CLIENT: Connected to $server_address. Please select an option\n";
+    print_menu();
+    
+    # Continue looping until the client enters 5
+    while (1) 
+    {
+        print "Enter your choice\n";
+        my $user_choice = <STDIN>;
+        chomp($user_choice);
+        last if $user_choice eq "5"; # Break out of the loop
+        process_client_choice($client_socket, $user_choice);
+    }
+    close($client_socket);
+}
+
+sub start_server{
+    my ($server_address) = $localhost;
+    my $server_socket = new IO::Socket::INET(
+       #  LocalAddr => $server_address,
         LocalPort => $PORT,
         Proto => 'tcp',
         Listen => 5,
         Reuse => 1
-    ) or die "Could not create server socket: $!\n";
-    print "SERVER: Socket created, bound, and now listening on port $PORT.\n";
-    return $server_socket;
+    )
+    or die "Could not create server: $!\n";
+    
+     # Accept Connections from client
+    while (my $client_socket = $server_socket->accept()) {
+        print "SERVER: Connection received from client\n";
+        my $client_message;
+        $client_socket->recv($client_message, 1024);
+        chomp($client_message);
+        print "SERVER: Received message from client: $client_message\n";
+        process_client_request($client_socket, $client_message);
+    }
 }
 
 
-# Menu to provide the valid options to the user. 
-print "CLIENT: Successfully connected to $server_address. Please select an option\n";
-print "1: List the LDAP Users\n";
-print "2: List the LDAP Groups\n";
-print "3: Set a group\n";
-print "4: Create a user\n";
-print "5: Exit\n";
-print "Enter your choice please\n";
+sub print_menu{
 
-my $user_choice = <STDIN>;
-chomp($user_choice);
-
-
-# Process user choice
-if ($user_choice == 1) 
-{
-    $client_message = "userlist";
-} elsif ($user_choice == 2) 
-{
-    $client_message = "grouplist";
-} elsif ($user_choice == 3) 
-{
-    print "Enter the name of the group: \n";
-    my $group = <STDIN>;
-    chomp($group);
-    $client_message = "setgroup $group";
-} elsif ($user_choice == 4) 
-{
-    print "Enter the username: \n";
-    my $username = <STDIN>;
-    chomp($username);
-    print "Enter the password: \n";
-    my $password = <STDIN>;
-    chomp($password);
-    $client_message = "createuser $username $password";
-} elsif ($user_choice == 5) {
-    print "Closing the script\n";
-    # Close the socket and exit
-    close($client_socket);
-    exit 0;
-    last;
-} else 
-{
-    print "Invalid choice. Please choose a selection between 1-5\n";print "Invalid choice, Please choose a selection between 1-5\n";
-    print "Your choice was $user_choice\n";
-    next;
+    print "1: List the LDAP Users\n";
+    print "2: List the LDAP Groups\n";
+    print "3: Set a group\n";
+    print "4: Create a user\n";
+    print "5: Exit\n";
+    print "Enter your choice please\n";
 }
-
-# Send the choice to the server
-$client_socket->send("$user_choice\n");
-
-my $response;
-# Send a message to the server
-$client_socket->recv($response, 1024);
-
-while (<$client_socket>)
-{
-    print "CLIENT: Recieved response from server: $_\n";
-}
-
-close($client_socket);
-
-# Accept Connections from client
-# I am so turned around with the connections. Really
-# Need to figure out what is resonsible for what
-while ($client_socket = $server_socket->accept())
-{
-    my $client_message;
-    print "SERVER: Connected to the server\n";
-    $client_socket->recv($client_message, 1024);
-    chomp($client_message);
-    # $client_socket->recv($client_message, 1024);
-    print "SERVER: Received message from client: $client_message\n";
-    process_client_request($client_socket, $client_message);
-}
-
-# 
-# while ($client_socket = $server_socket->accept())
-# {
-#     print "SERVER: Connection received from client.\n";
-#     my $client_message = get_message_from_client($client_socket);
-#     $client_message = "Hello Server";
-#     print "SERVER: Received message from client: $client_message\n";
-#     process_client_request($client_socket, $client_message);
-# }
-
 
 
 
 # Sub to get the message that the client is sending to the server
-sub get_message_from_client {
-    my ($client_socket) = @_;
-    my $client_message;
-    $client_socket->recv($client_message, 1024);
-    chomp($client_message);
-    return $client_message;
-}
+# sub get_message_from_client {
+#     my ($client_socket) = @_;
+#     my $client_message;
+#     $client_socket->recv($client_message, 1024);
+#     chomp($client_message);
+#     return $client_message;
+# }
 
 # Sub to get the string from the client and then call required subroutines to complete the request
 sub process_client_request {
     my ($client_socket, $client_message) = @_;
 
-    if ($client_message eq "userlist")
+    # Current issue here is that the prints to prompt for further information are displaying
+    # on the client and not the server
+
+    $client_socket->send("$client_message\n");
+
+    my $response;
+    $client_socket->recv($response, 1024);
+    chomp($response);
+    if ($client_message eq "1")
     {
         $userlist = get_userlist();
-        print $client_socket "$userlist\n";
+        $response = "userlist";
     }
-    elsif ($client_message eq "grouplist")
+    elsif ($client_message eq "2")
     {
         $grouplist = get_grouplist();
-        print $client_socket "$grouplist\n";
+        $response = "grouplist";
     }
-    elsif ($client_message eq "setgroup")
+    elsif ($client_message eq "3")
     {
-        my $group_name = $1;
-        set_group($client_socket, $group_name);
+        print "Enter the name of the group: ";
+        my $group = <STDIN>;
+        chomp($group);
+        $response = "setgroup $group";
     }
-    elsif ($client_message eq "createuser")
+    elsif ($client_message eq "4")
     {
-        my $username = $1;
-        create_user($client_socket, $username);
+        print "Enter the username: ";
+        my $username = <STDIN>;
+        chomp($username);
+        print "Enter the password: ";
+        my $password = <STDIN>;
+        chomp($password);
+        $response = "createuser $username $password";
+        #create_user($client_socket, $username, $password);
     }
     else
     {
-        print $client_socket "Invalid command\n";
+        $response = "Invalid command";
     }
+
+    print "SERVER: Sending response to client: $response\n";
+    $client_socket->recv($response, 1024);
 }
+
+# Sub to process the client choice and send it to the server
+sub process_client_choice{
+
+    my ($server_socket, $user_choice) = @_;
+    $server_socket->send("$user_choice\n");
+
+    my $response;
+    $client_socket->recv($response, 1024);
+    chomp($response);
+    print "CLIENT: Server response: $response\n";
+
+    # Prompt the user for additional input based on the response
+    if ($response eq "3") {
+        print "Enter the name of the group: ";
+        my $group = <STDIN>;
+        chomp($group);
+        $client_socket->send("$group\n");
+    } elsif ($response eq "4") {
+        print "Enter the username: ";
+        my $username = <STDIN>;
+        chomp($username);
+        print "Enter the password: ";
+        my $password = <STDIN>;
+        chomp($password);
+        $client_socket->send("$username $password\n");
+    }
+     print_menu();
+
+}
+
 
 # Subroutine to get a list of users from ldap
 sub get_userlist
 {
     my $userlist;
-    open(my $LDAPUSERS, "sudo slapcat |" ) or die "Couldn't Open the ldap database. $!\n"; 
+    open(my $LDAPUSERS, `sudo slapcat |` ) or die "Couldn't Open the ldap database. $!\n"; 
 
         while (my $line = <$LDAPUSERS>)
         {
@@ -197,10 +216,11 @@ sub get_userlist
             {
                 # Add the users to a cs list
                 $userlist .= "$1,";
+                print "$userlist";
             }
         }  
         # Get rid of the trailing comma
-        $userlist =~ s/,$//; 
+        # $userlist =~ s/,$//; 
         # Close the file handle
         close($LDAPUSERS);
         return $userlist;
@@ -223,10 +243,10 @@ sub get_grouplist
                 $grouplist .= "$1,";
             }
         }
-            # Get rid of the trailing comma
-            $grouplist =~ s/,$//;
-            close($LDAPGROUPS);
-            return $grouplist;
+        # Get rid of the trailing comma
+        $grouplist =~ s/,$//;
+        close($LDAPGROUPS);
+        return $grouplist;
 }
 
 sub set_group
